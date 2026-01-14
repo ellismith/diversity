@@ -53,27 +53,5 @@ Analysis pipeline for calculating and visualizing alpha and beta diversity of ce
 - scikit-learn
 - matplotlib
 - seaborn
-EOF
-
-# Create .gitignore
-cat > .gitignore << 'EOF'
-# Data files
-*.csv
-*.h5ad
-
-# Output directories
-diversity/
-diversity_figs/
-composition_figs/
-entropy_csvs/
-entropy_figs/
-pc_variability/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-
-# System
 .DS_Store
 EOF
