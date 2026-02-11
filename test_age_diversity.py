@@ -7,14 +7,22 @@ import os
 import glob
 
 def test_age_effect(alpha_file):
-    """Test linear relationship between age and Shannon diversity"""
+    """Test linear relationship between age and alpha diversity"""
     df = pd.read_csv(alpha_file, index_col=0)
     
+    # Detect metric
+    if 'shannon_diversity' in df.columns:
+        metric_col = 'shannon_diversity'
+    elif 'adjusted_entropy' in df.columns:
+        metric_col = 'adjusted_entropy'
+    else:
+        return None
+    
     # Linear regression
-    slope, intercept, r_value, p_value, std_err = stats.linregress(df['age'], df['shannon_diversity'])
+    slope, intercept, r_value, p_value, std_err = stats.linregress(df['age'], df[metric_col])
     
     # Pearson correlation
-    corr, corr_p = stats.pearsonr(df['age'], df['shannon_diversity'])
+    corr, corr_p = stats.pearsonr(df['age'], df[metric_col])
     
     return {
         'n': len(df),
@@ -23,7 +31,8 @@ def test_age_effect(alpha_file):
         'r_squared': r_value**2,
         'r': corr,
         'p_value': p_value,
-        'std_err': std_err
+        'std_err': std_err,
+        'metric_type': metric_col
     }
 
 def test_beta_age_effect(beta_file, alpha_file):
@@ -60,6 +69,8 @@ def main():
     parser = argparse.ArgumentParser(description="Test age effects on diversity metrics")
     parser.add_argument("--region", type=str, required=True, help="Region name (e.g., HIP, CN)")
     parser.add_argument("--level", type=str, choices=['celltype', 'subtype'], default='subtype')
+    parser.add_argument("--metric", type=str, choices=['shannon', 'adjusted'], default='adjusted',
+                        help="Which alpha diversity metric to test (default: adjusted)")
     parser.add_argument("--diversity_dir", type=str, default="/scratch/easmit31/variability/diversity")
     parser.add_argument("--out_dir", type=str, default="/scratch/easmit31/variability/diversity")
     args = parser.parse_args()
@@ -68,15 +79,16 @@ def main():
     
     # Find all relevant files
     if args.level == 'celltype':
-        alpha_pattern = f"{args.region}_celltype_alpha_diversity.csv"
+        alpha_pattern = f"{args.region}_celltype_alpha_diversity_{args.metric}.csv"
         beta_pattern = f"{args.region}_celltype_beta_diversity.csv"
         alpha_files = [os.path.join(args.diversity_dir, alpha_pattern)]
         beta_files = [os.path.join(args.diversity_dir, beta_pattern)]
     else:
-        alpha_pattern = f"{args.region}_*_subtype_alpha_diversity.csv"
+        alpha_pattern = f"{args.region}_*_subtype_alpha_diversity_{args.metric}.csv"
         beta_pattern = f"{args.region}_*_subtype_beta_diversity.csv"
         alpha_files = sorted(glob.glob(os.path.join(args.diversity_dir, alpha_pattern)))
-        beta_files = sorted(glob.glob(os.path.join(args.diversity_dir, beta_pattern)))
+        beta_files = [f.replace(f'_alpha_diversity_{args.metric}.csv', '_beta_diversity.csv') 
+                     for f in alpha_files]
     
     # Test alpha diversity
     alpha_results = []
@@ -88,15 +100,19 @@ def main():
         if args.level == 'celltype':
             celltype = 'All Cell Types'
         else:
-            celltype = basename.replace(f"{args.region}_", "").replace("_subtype_alpha_diversity.csv", "")
+            celltype = basename.replace(f"{args.region}_", "").replace(f"_subtype_alpha_diversity_{args.metric}.csv", "")
             celltype = celltype.replace("_", " ")
         
         result = test_age_effect(alpha_file)
+        if result is None:
+            continue
+            
         result['cell_type'] = celltype
         result['metric'] = 'alpha_diversity'
         alpha_results.append(result)
         
-        print(f"\n{celltype} - Alpha Diversity:")
+        metric_name = result['metric_type']
+        print(f"\n{celltype} - Alpha Diversity ({metric_name}):")
         print(f"  n={result['n']}, r={result['r']:.3f}, r²={result['r_squared']:.3f}, p={result['p_value']:.4f}")
         print(f"  slope={result['slope']:.4f} ± {result['std_err']:.4f}")
     
@@ -116,6 +132,7 @@ def main():
         result = test_beta_age_effect(beta_file, alpha_file)
         result['cell_type'] = celltype
         result['metric'] = 'beta_diversity'
+        result['metric_type'] = 'bray_curtis'
         beta_results.append(result)
         
         print(f"\n{celltype} - Beta Diversity:")
@@ -126,7 +143,7 @@ def main():
     all_results = alpha_results + beta_results
     results_df = pd.DataFrame(all_results)
     
-    out_file = os.path.join(args.out_dir, f"{args.region}_{args.level}_age_effects.csv")
+    out_file = os.path.join(args.out_dir, f"{args.region}_{args.level}_age_effects_{args.metric}.csv")
     results_df.to_csv(out_file, index=False)
     print(f"\n\nSaved all results to: {out_file}")
 

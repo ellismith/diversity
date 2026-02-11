@@ -11,15 +11,26 @@ def plot_regression_scatter(alpha_file, title, out_file, stats_dict=None):
     """Scatter plot with regression line"""
     df = pd.read_csv(alpha_file, index_col=0)
     
+    # Detect which metric
+    if 'shannon_diversity' in df.columns:
+        metric_col = 'shannon_diversity'
+        ylabel = 'Shannon Diversity'
+    elif 'adjusted_entropy' in df.columns:
+        metric_col = 'adjusted_entropy'
+        ylabel = 'Adjusted Entropy'
+    else:
+        print(f"ERROR: No recognized diversity metric in {alpha_file}")
+        return
+    
     fig, ax = plt.subplots(figsize=(10, 6))
     
     # Scatter points
-    scatter = ax.scatter(df['age'], df['shannon_diversity'], 
+    scatter = ax.scatter(df['age'], df[metric_col], 
                         c=df['age'], cmap='viridis', s=100, alpha=0.7, 
                         edgecolors='black', linewidth=0.5)
     
     # Regression line
-    slope, intercept, r_value, p_value, std_err = stats.linregress(df['age'], df['shannon_diversity'])
+    slope, intercept, r_value, p_value, std_err = stats.linregress(df['age'], df[metric_col])
     x_range = np.array([df['age'].min(), df['age'].max()])
     y_pred = slope * x_range + intercept
     ax.plot(x_range, y_pred, 'r--', linewidth=2, alpha=0.8, label='Linear fit')
@@ -35,7 +46,7 @@ def plot_regression_scatter(alpha_file, title, out_file, stats_dict=None):
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     ax.set_xlabel('Age (years)', fontsize=13)
-    ax.set_ylabel('Shannon Diversity', fontsize=13)
+    ax.set_ylabel(ylabel, fontsize=13)
     ax.set_title(title, fontsize=14, pad=15)
     ax.grid(alpha=0.3, ls='--')
     ax.legend(fontsize=10)
@@ -163,32 +174,41 @@ def main():
     region = os.path.basename(args.stats_file).split('_')[0]
     level = os.path.basename(args.stats_file).split('_')[1]
     
+    # Detect metric type from filename
+    if 'adjusted' in args.stats_file:
+        metric = 'adjusted'
+    elif 'shannon' in args.stats_file:
+        metric = 'shannon'
+    else:
+        metric = 'shannon'  # default
+    
     # Create summary plot
-    summary_out = os.path.join(args.out_dir, f"{region}_{level}_age_effects_summary.png")
+    summary_out = os.path.join(args.out_dir, f"{region}_{level}_age_effects_summary_{metric}.png")
     plot_effect_size_summary(args.stats_file, summary_out)
     
     # Optionally plot individual regressions
     if args.plot_individual:
         for _, row in stats_df.iterrows():
             celltype = row['cell_type']
-            metric = row['metric']
+            metric_type = row['metric']
             
-            if metric == 'alpha_diversity':
+            if metric_type == 'alpha_diversity':
                 celltype_clean = celltype.replace(' ', '_').replace('/', '_')
                 if level == 'celltype':
                     prefix = f"{region}_celltype"
                 else:
                     prefix = f"{region}_{celltype_clean}_subtype"
                 
-                alpha_file = os.path.join(args.diversity_dir, f"{prefix}_alpha_diversity.csv")
+                alpha_file = os.path.join(args.diversity_dir, f"{prefix}_alpha_diversity_{metric}.csv")
                 if not os.path.exists(alpha_file):
+                    print(f"Skipping {celltype}: {alpha_file} not found")
                     continue
                 
                 title = f"{region} {celltype} - Alpha Diversity vs Age"
-                out_file = os.path.join(args.out_dir, f"{prefix}_alpha_age_regression.png")
+                out_file = os.path.join(args.out_dir, f"{prefix}_alpha_age_regression_{metric}.png")
                 plot_regression_scatter(alpha_file, title, out_file)
             
-            elif metric == 'beta_diversity':
+            elif metric_type == 'beta_diversity':
                 celltype_clean = celltype.replace(' ', '_').replace('/', '_')
                 if level == 'celltype':
                     prefix = f"{region}_celltype"
@@ -196,12 +216,13 @@ def main():
                     prefix = f"{region}_{celltype_clean}_subtype"
                 
                 beta_file = os.path.join(args.diversity_dir, f"{prefix}_beta_diversity.csv")
-                alpha_file = os.path.join(args.diversity_dir, f"{prefix}_alpha_diversity.csv")
+                alpha_file = os.path.join(args.diversity_dir, f"{prefix}_alpha_diversity_{metric}.csv")
                 if not os.path.exists(beta_file) or not os.path.exists(alpha_file):
+                    print(f"Skipping {celltype}: files not found")
                     continue
                 
                 title = f"{region} {celltype} - Beta Diversity vs Age"
-                out_file = os.path.join(args.out_dir, f"{prefix}_beta_age_regression.png")
+                out_file = os.path.join(args.out_dir, f"{prefix}_beta_age_regression_{metric}.png")
                 plot_beta_regression(beta_file, alpha_file, title, out_file)
 
 if __name__ == "__main__":

@@ -7,10 +7,34 @@ from scipy.spatial.distance import pdist, squareform
 import os
 import argparse
 
-def calculate_alpha_diversity(props_df):
+def adjusted_entropy(proportions):
+    """
+    Adjusted entropy formula from paper.
+    E_s = (H - log(k)) / log(k) = H/log(k) - 1
+    Range: [-1, 0] where 0 = uniform (max diversity), -1 = single type (min diversity)
+    """
+    k = len(proportions)
+    if k <= 1:
+        return -1.0  # Single category = minimum diversity
+    
+    # Filter out zeros to avoid log(0)
+    p_nonzero = proportions[proportions > 0]
+    
+    # Calculate Shannon entropy
+    H = -(p_nonzero * np.log(p_nonzero)).sum()
+    
+    # Apply the formula: (H - log(k)) / log(k) = H/log(k) - 1
+    return (H - np.log(k)) / np.log(k)
+
+def calculate_alpha_diversity_shannon(props_df):
     """Calculate Shannon diversity for each individual (row)"""
     shannon = props_df.apply(lambda row: entropy(row, base=np.e), axis=1)
     return pd.DataFrame({'shannon_diversity': shannon})
+
+def calculate_alpha_diversity_adjusted(props_df):
+    """Calculate adjusted entropy for each individual (row)"""
+    adj_entropy = props_df.apply(lambda row: adjusted_entropy(row.values), axis=1)
+    return pd.DataFrame({'adjusted_entropy': adj_entropy})
 
 def calculate_beta_diversity(props_df):
     """Calculate pairwise Bray-Curtis dissimilarity between individuals"""
@@ -25,6 +49,9 @@ def main():
                         help="Calculate diversity at cell type or subtype level")
     parser.add_argument("--celltype", type=str, default=None,
                         help="If level=subtype, which cell type to analyze (e.g., 'GABAergic neurons')")
+    parser.add_argument("--metrics", type=str, nargs='+', 
+                        choices=['shannon', 'adjusted', 'both'], default=['both'],
+                        help="Which alpha diversity metrics to calculate (default: both)")
     parser.add_argument("--celltype_col", type=str, default="cell_class_annotation")
     parser.add_argument("--subtype_col", type=str, default="subtype")
     parser.add_argument("--min_age", type=float, default=1.0,
@@ -36,6 +63,12 @@ def main():
     
     if args.level == 'subtype' and args.celltype is None:
         parser.error("--celltype is required when --level=subtype")
+    
+    # Handle 'both' option
+    if 'both' in args.metrics:
+        metrics_to_calc = ['shannon', 'adjusted']
+    else:
+        metrics_to_calc = args.metrics
     
     os.makedirs(args.out_dir, exist_ok=True)
     
@@ -89,33 +122,43 @@ def main():
     
     print(f"Computing diversity for {len(props)} individuals")
     
-    # Calculate alpha diversity
-    alpha = calculate_alpha_diversity(props)
-    # Add age to alpha diversity dataframe
-    alpha = alpha.merge(metadata, left_index=True, right_index=True)
-    alpha_file = os.path.join(args.out_dir, f"{prefix}_alpha_diversity.csv")
-    alpha.to_csv(alpha_file)
-    print(f"Saved: {alpha_file}")
-    print(f"  Mean Shannon: {alpha['shannon_diversity'].mean():.3f}")
-    print(f"  SD Shannon: {alpha['shannon_diversity'].std():.3f}")
+    # Calculate alpha diversity for requested metrics
+    for metric in metrics_to_calc:
+        print(f"\n--- Calculating {metric} alpha diversity ---")
+        
+        if metric == 'shannon':
+            alpha = calculate_alpha_diversity_shannon(props)
+            metric_name = 'shannon_diversity'
+        elif metric == 'adjusted':
+            alpha = calculate_alpha_diversity_adjusted(props)
+            metric_name = 'adjusted_entropy'
+        
+        # Add age to alpha diversity dataframe
+        alpha = alpha.merge(metadata, left_index=True, right_index=True)
+        alpha_file = os.path.join(args.out_dir, f"{prefix}_alpha_diversity_{metric}.csv")
+        alpha.to_csv(alpha_file)
+        print(f"Saved: {alpha_file}")
+        print(f"  Mean {metric_name}: {alpha[metric_name].mean():.3f}")
+        print(f"  SD {metric_name}: {alpha[metric_name].std():.3f}")
+        
+        # Calculate beta diversity (same for both metrics)
+        if metric == metrics_to_calc[0]:  # Only calculate beta once
+            beta = calculate_beta_diversity(props)
+            beta_file = os.path.join(args.out_dir, f"{prefix}_beta_diversity.csv")
+            beta.to_csv(beta_file)
+            print(f"Saved: {beta_file}")
+            
+            # Get upper triangle for mean (exclude diagonal)
+            upper_tri = beta.values[np.triu_indices_from(beta.values, k=1)]
+            print(f"  Mean Bray-Curtis: {upper_tri.mean():.3f}")
+            print(f"  SD Bray-Curtis: {upper_tri.std():.3f}")
+            
+            # Save metadata
+            metadata_file = os.path.join(args.out_dir, f"{prefix}_metadata.csv")
+            metadata.to_csv(metadata_file)
+            print(f"Saved: {metadata_file}")
     
-    # Calculate beta diversity
-    beta = calculate_beta_diversity(props)
-    beta_file = os.path.join(args.out_dir, f"{prefix}_beta_diversity.csv")
-    beta.to_csv(beta_file)
-    print(f"Saved: {beta_file}")
-    
-    # Get upper triangle for mean (exclude diagonal)
-    upper_tri = beta.values[np.triu_indices_from(beta.values, k=1)]
-    print(f"  Mean Bray-Curtis: {upper_tri.mean():.3f}")
-    print(f"  SD Bray-Curtis: {upper_tri.std():.3f}")
-    
-    # Save metadata
-    metadata_file = os.path.join(args.out_dir, f"{prefix}_metadata.csv")
-    metadata.to_csv(metadata_file)
-    print(f"Saved: {metadata_file}")
-    
-    print(f"\nOutputs saved to: {args.out_dir}")
+    print(f"\nAll outputs saved to: {args.out_dir}")
 
 if __name__ == "__main__":
     main()
